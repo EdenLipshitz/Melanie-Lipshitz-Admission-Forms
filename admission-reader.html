@@ -1,0 +1,378 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Netcare Admission Form OCR Test</title>
+<style>
+body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;background:#f5f5f5;margin:0;padding:15px;}
+#app{max-width:900px;margin:auto;background:white;padding:20px;border-radius:14px;}
+h2{margin-top:0;}
+h3{margin-top:25px;padding-bottom:6px;border-bottom:2px solid #ddd;}
+.note{background:#fff4d6;padding:12px;border-radius:8px;}
+.upload{display:block;background:#007aff;color:white;padding:16px;text-align:center;border-radius:10px;font-weight:bold;margin:20px 0;cursor:pointer;}
+.upload input{display:none;}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;}
+label{font-size:13px;font-weight:bold;}
+input,textarea{width:100%;box-sizing:border-box;margin-top:5px;padding:10px;font-size:16px;border:1px solid #bbb;border-radius:7px;background:white;}
+input.empty-field{border:2px solid #ff3b30;background:#fff5f5;}
+textarea{height:150px;font-family:monospace;font-size:12px;}
+#status{padding:10px;margin:10px 0;font-weight:bold;}
+#preview{max-width:100%;max-height:400px;display:none;margin:15px auto;border-radius:8px;}
+.account-no-block{margin-bottom:24px;}
+.account-no-label{font-size:16px;font-weight:bold;display:block;margin-bottom:6px;}
+.account-no-input{font-size:26px;font-weight:bold;padding:16px;border:2px solid #007aff;border-radius:10px;letter-spacing:1px;}
+@media(max-width:600px){.grid{grid-template-columns:1fr;}}
+</style>
+</head>
+<body>
+<div id="app">
+<h2>Netcare Admission Form OCR Test</h2>
+<p class="note">
+Reads the typed information from a photo of the admission form. The form is split into
+left/right column images before OCR, since the original layout confuses line-based text
+reading. The handwritten account number is deliberately NOT read by OCR — enter it
+manually in the field below. The Auth number field is outlined in red if the OCR found
+it blank — tap in to fill it manually if needed.
+</p>
+
+<div class="account-no-block">
+<label class="account-no-label" for="accountNo">Account No. (handwritten — enter manually)</label>
+<input id="accountNo" class="account-no-input" placeholder="Enter account number">
+</div>
+
+<label class="upload">
+📷 TAKE / CHOOSE PHOTO
+<input type="file" id="photo" accept="image/*" capture="environment">
+</label>
+<div id="status">Waiting for photograph…</div>
+<img id="preview">
+<canvas id="workCanvas" style="display:none"></canvas>
+
+<h3>Patient Details</h3>
+<div class="grid">
+<div><label>Patient Case No.<input id="caseNo"></label></div>
+<div><label>Title<input id="title"></label></div>
+<div><label>Surname<input id="surname"></label></div>
+<div><label>First names<input id="firstNames"></label></div>
+<div><label>SA ID document<input id="patientID"></label></div>
+<div><label>DOB<input id="dob"></label></div>
+<div><label>Tel. No. H<input id="patientHome"></label></div>
+<div><label>Cell. No.<input id="patientCell"></label></div>
+<div><label>Email<input id="patientEmail"></label></div>
+<div><label>Adm. Doctor<input id="doctor"></label></div>
+</div>
+
+<h3>Person Responsible for Account</h3>
+<div class="grid">
+<div><label>Guarantor<input id="guarantor"></label></div>
+<div><label>SA ID Doc<input id="guarantorID"></label></div>
+<div><label>Pos. Address<input id="address"></label></div>
+<div><label>Tel.<input id="guarantorTel"></label></div>
+<div><label>Email<input id="guarantorEmail"></label></div>
+<div><label>Employer<input id="employer"></label></div>
+</div>
+
+<h3>Patient Medical Aid Details</h3>
+<div class="grid">
+<div><label>Med. Aid<input id="medAid"></label></div>
+<div><label>Plan<input id="plan"></label></div>
+<div><label>Member No.<input id="memberNo"></label></div>
+<div><label>Auth number<input id="auth"></label></div>
+<div><label>Dep. code<input id="depCode"></label></div>
+</div>
+
+<h3>Contact Person</h3>
+<div class="grid">
+<div><label>Name<input id="contact1Name"></label></div>
+<div><label>Relationship<input id="contact1Relationship"></label></div>
+<div><label>Tel. No. H<input id="contact1Home"></label></div>
+<div><label>Tel. No. W<input id="contact1Work"></label></div>
+<div><label>Tel. No. Cell<input id="contact1Cell"></label></div>
+</div>
+
+<h3>Other Contact Person</h3>
+<div class="grid">
+<div><label>Name<input id="contact2Name"></label></div>
+<div><label>Relationship<input id="contact2Relationship"></label></div>
+<div><label>Tel. No. H<input id="contact2Home"></label></div>
+<div><label>Tel. No. W<input id="contact2Work"></label></div>
+<div><label>Tel. No. Cell<input id="contact2Cell"></label></div>
+</div>
+
+<h3>Export</h3>
+<button id="exportBtn" style="width:100%;padding:14px;background:#34c759;color:white;border:none;border-radius:10px;font-weight:bold;font-size:16px;">Export as JSON (for the filing app)</button>
+<textarea id="exportOutput" readonly style="height:100px;margin-top:10px;" placeholder="Tap Export, then tap this box and select all to copy..."></textarea>
+
+<h3>OCR raw text — for testing</h3>
+<p style="font-size:12px;color:#666;margin-bottom:4px;">Left column:</p>
+<textarea id="rawLeft" placeholder="Left column OCR text..."></textarea>
+<p style="font-size:12px;color:#666;margin-bottom:4px;">Right column:</p>
+<textarea id="rawRight" placeholder="Right column OCR text..."></textarea>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+<script>
+const photo = document.getElementById("photo");
+const status = document.getElementById("status");
+const preview = document.getElementById("preview");
+const rawLeft = document.getElementById("rawLeft");
+const rawRight = document.getElementById("rawRight");
+
+photo.addEventListener("change", async function(){
+    const file = this.files[0];
+    if(!file) return;
+    preview.src = URL.createObjectURL(file);
+    preview.style.display = "block";
+    status.textContent = "Loading image…";
+
+    try{
+        const img = await loadImage(file);
+        const { leftBlob, rightBlob } = await splitImage(img);
+
+        status.textContent = "Reading left column… 0%";
+        const leftResult = await Tesseract.recognize(leftBlob, "eng", {
+            logger: m => { if(m.status==="recognizing text") status.textContent = "Reading left column… " + Math.round((m.progress||0)*100) + "%"; }
+        });
+
+        status.textContent = "Reading right column… 0%";
+        const rightResult = await Tesseract.recognize(rightBlob, "eng", {
+            logger: m => { if(m.status==="recognizing text") status.textContent = "Reading right column… " + Math.round((m.progress||0)*100) + "%"; }
+        });
+
+        const leftText = leftResult.data.text;
+        const rightText = rightResult.data.text;
+        rawLeft.value = leftText;
+        rawRight.value = rightText;
+
+        extractFields(leftText, rightText);
+        highlightEmptyFields();
+        status.textContent = "OCR complete — please check the extracted information.";
+    }catch(error){
+        console.error(error);
+        status.textContent = "Sorry — the photograph could not be read. (" + error.message + ")";
+    }
+});
+
+function loadImage(file){
+    if(window.createImageBitmap){
+        return createImageBitmap(file, { imageOrientation: "from-image" });
+    }
+    return new Promise((resolve, reject) => {
+        const img = new Image();
+        img.onload = () => resolve(img);
+        img.onerror = reject;
+        img.src = URL.createObjectURL(file);
+    });
+}
+
+async function splitImage(img){
+    const w = img.width || img.naturalWidth;
+    const h = img.height || img.naturalHeight;
+    const mid = Math.floor(w/2);
+    const overlap = Math.floor(w*0.03);
+
+    const leftCanvas = document.createElement("canvas");
+    leftCanvas.width = mid + overlap;
+    leftCanvas.height = h;
+    leftCanvas.getContext("2d").drawImage(img, 0,0, leftCanvas.width, h, 0,0, leftCanvas.width, h);
+
+    const rightCanvas = document.createElement("canvas");
+    rightCanvas.width = w - mid + overlap;
+    rightCanvas.height = h;
+    rightCanvas.getContext("2d").drawImage(img, mid-overlap,0, rightCanvas.width, h, 0,0, rightCanvas.width, h);
+
+    const leftBlob = await new Promise(resolve => leftCanvas.toBlob(resolve, "image/png"));
+    const rightBlob = await new Promise(resolve => rightCanvas.toBlob(resolve, "image/png"));
+    return { leftBlob, rightBlob };
+}
+
+function cleanGeneric(raw){
+    let val = (raw||"").replace(/^[^A-Za-z0-9+]+/,"").trim();
+    val = val.replace(/^[a-z](?=[A-Z])/, "");
+    return val;
+}
+function cleanId(raw){
+    const digits = ((raw||"").match(/\d/g)||[]).join("");
+    if(digits.length >= 13) return digits.slice(-13);
+    return cleanGeneric(raw);
+}
+function cleanMemberNo(raw){
+    const val = (raw||"").trim();
+    const colonMatch = val.match(/:(\d+)/);
+    if(colonMatch) return colonMatch[1];
+    const digits = (val.match(/\d+/)||[""])[0];
+    if(digits.length >= 10) return digits.slice(1);
+    return cleanGeneric(raw);
+}
+function cleanAuthNumber(raw){
+    const v = cleanGeneric(raw);
+    if(v.length === 1) return "";
+    return v;
+}
+function cleanPhone(raw){
+    const compact = (raw||"").replace(/[^\d+]/g,"");
+    let m = compact.match(/27\d{9}/);
+    if(m) return "+"+m[0];
+    m = compact.match(/0\d{9}/);
+    if(m) return m[0];
+    m = compact.match(/\+?\d{9,13}/);
+    return m ? m[0] : "";
+}
+function cleanEmail(raw){
+    let val = (raw||"").replace(/\s+/g,"");
+    val = val.replace(/\.\.+/g,".");
+    val = val.replace(/^[^A-Za-z0-9]+/,"");
+    let result = "";
+    let m = val.match(/[A-Za-z0-9_.+-]+@[A-Za-z0-9-]+\.[A-Za-z.]{2,}/);
+    if(m){
+        result = m[0];
+    } else {
+        const fm = val.match(/^(.*?)[a-zA-Z]?(gmail|yahoo|outlook|hotmail|icloud|mweb|telkomsa|isandler)\.(com|co\.za|net)$/i);
+        result = fm ? (fm[1] + "@" + fm[2].toLowerCase() + "." + fm[3].toLowerCase()) : cleanGeneric(raw);
+    }
+    result = result.replace(/^[^A-Za-z0-9]+/,"");
+    return result;
+}
+function cleanDate(raw){
+    const m = (raw||"").match(/\d{1,2}\.\d{1,2}\.\d{4}/);
+    return m ? m[0] : cleanGeneric(raw);
+}
+function stripTrailingArtifact(v){
+    const tokens = v.split(" ");
+    if(tokens.length > 1 && tokens[tokens.length-1].length <= 3){
+        tokens.pop();
+        return tokens.join(" ").trim();
+    }
+    return v;
+}
+function cleanName(raw){
+    let v = cleanGeneric(raw);
+    v = stripTrailingArtifact(v);
+    return /[A-Za-z]/.test(v) ? v : "";
+}
+
+function findValue(sectionText, labels){
+    if(!sectionText) return "";
+    const lines = sectionText.split("\n").map(l=>l.replace(/\|/g," ").replace(/\s+/g," ").trim()).filter(Boolean);
+    for(const line of lines){
+        for(const label of labels){
+            const pos = line.toLowerCase().indexOf(label.toLowerCase());
+            if(pos !== -1){
+                const val = line.substring(pos + label.length);
+                if(val.trim().length > 0) return val;
+            }
+        }
+    }
+    return "";
+}
+
+function splitByMarkers(text, markers){
+    const positions = [];
+    for(const {key, re, nth} of markers){
+        const flags = re.flags.includes("g") ? re.flags : re.flags+"g";
+        const matches = [...text.matchAll(new RegExp(re.source, flags))];
+        const idx = matches.length >= (nth||1) ? matches[(nth||1)-1].index : -1;
+        if(idx !== -1) positions.push({key, idx});
+    }
+    positions.sort((a,b)=>a.idx-b.idx);
+    const sections = {};
+    for(let i=0;i<positions.length;i++){
+        const end = i+1<positions.length ? positions[i+1].idx : text.length;
+        sections[positions[i].key] = text.substring(positions[i].idx, end);
+    }
+    return sections;
+}
+
+function set(id,value){
+    if(value) document.getElementById(id).value = value;
+}
+
+function highlightEmptyFields(){
+    const el = document.getElementById("auth");
+    if(!el) return;
+    if(!el.value || el.value.trim()===""){
+        el.classList.add("empty-field");
+    } else {
+        el.classList.remove("empty-field");
+    }
+}
+
+function extractFields(leftText, rightText){
+    const leftSections = splitByMarkers(leftText, [
+        { key:"patient",    re:/P?atient\s+Details/i },
+        { key:"guarantor",  re:/Person\s+Responsible\s+for\s+Account/i },
+        { key:"medaid",     re:/Medical\s+Aid\s+Details/i },
+        { key:"contact1",   re:/Contact\s+Person/i }
+    ]);
+    const rightSections = splitByMarkers(rightText, [
+        { key:"patient",    re:/FirstNames/i },
+        { key:"guarantor",  re:/SA\s*ID\s*Doc/i, nth:2 },
+        { key:"medaid",     re:/Member\s*No/i },
+        { key:"contact2",   re:/Other\s+Contact\s+Person/i }
+    ]);
+
+    const L = { patient:"", guarantor:"", medaid:"", contact1:"", ...leftSections };
+    const R = { patient:"", guarantor:"", medaid:"", contact2:"", ...rightSections };
+
+    set("caseNo", cleanMemberNo(findValue(leftText, ["Case No.","Case No","Case Number"])));
+
+    set("title",         cleanName(findValue(L.patient, ["Title"])));
+    set("surname",       cleanName(findValue(L.patient, ["Surname"])));
+    set("doctor",        cleanName(findValue(L.patient, ["Adm. Doctor","Adm Doctor"])));
+    set("firstNames",    cleanName(findValue(R.patient, ["FirstNames","First Names"])));
+    set("patientID",     cleanId(findValue(R.patient, ["SA ID Doc","SA ID document"])));
+    set("dob",           cleanDate(findValue(R.patient, ["DOB"])));
+    set("patientHome",   cleanPhone(findValue(R.patient, ["Tel. No. H","Tel No H"])));
+    set("patientCell",   cleanPhone(findValue(R.patient, ["Cell. No.","Cell No"])));
+    set("patientEmail",  cleanEmail(findValue(R.patient, ["Email"])));
+
+    set("guarantor",       cleanName(findValue(L.guarantor, ["Guarantor"])));
+    set("address",         cleanGeneric(findValue(L.guarantor, ["Pos .Address","Pos. Address","Pos.Address"])));
+    set("guarantorTel",    cleanPhone(findValue(L.guarantor, ["Tel. No."])));
+    set("guarantorID",     cleanId(findValue(R.guarantor, ["SA ID Doc"])));
+    set("employer",        cleanName(findValue(R.guarantor, ["Employer"])));
+    set("guarantorEmail",  cleanEmail(findValue(R.guarantor, ["Email"])));
+
+    set("medAid",   cleanName(findValue(L.medaid, ["Med. Aid"])));
+    set("plan",     cleanName(findValue(L.medaid, ["Plan"])));
+    set("memberNo", cleanMemberNo(findValue(R.medaid, ["Member No.","Member No"])));
+    set("auth",     cleanAuthNumber(findValue(R.medaid, ["Auth number","Auth Number"])));
+    set("depCode",  cleanGeneric(findValue(R.medaid, ["Dep. Code","Dep Code","Dep.Code"])));
+
+    set("contact1Name",         cleanName(findValue(L.contact1, ["Name"])));
+    set("contact1Relationship", cleanName(findValue(L.contact1, ["Relationship"])));
+    set("contact1Home",         cleanPhone(findValue(L.contact1, ["Tel.No.H","Tel. No. H","Tel .No.H"])));
+    set("contact1Work",         cleanPhone(findValue(L.contact1, ["Tel. No. W","Tel.No.W","Tel .No.W"])));
+    set("contact1Cell",         cleanPhone(findValue(L.contact1, ["Tel. No. Cell","Tel.No.Cell","Tel .No.Cell"])));
+
+    set("contact2Name",         cleanName(findValue(R.contact2, ["Name"])));
+    set("contact2Relationship", cleanName(findValue(R.contact2, ["Relationship"])));
+    set("contact2Home",         cleanPhone(findValue(R.contact2, ["Tel.No.H","Tel. No. H","Tel .No.H"])));
+    set("contact2Work",         cleanPhone(findValue(R.contact2, ["Tel. No. W","Tel.No.W","Tel .No.W"])));
+    set("contact2Cell",         cleanPhone(findValue(R.contact2, ["Tel. No. Cell","Tel.No.Cell","Tel .No.Cell"])));
+}
+
+document.getElementById("exportBtn").addEventListener("click", function(){
+    const fieldIds = [
+        "caseNo","title","surname","firstNames","patientID","dob","patientHome","patientCell","patientEmail","doctor",
+        "guarantor","guarantorID","address","guarantorTel","guarantorEmail","employer",
+        "medAid","plan","memberNo","auth","depCode",
+        "contact1Name","contact1Relationship","contact1Home","contact1Work","contact1Cell",
+        "contact2Name","contact2Relationship","contact2Home","contact2Work","contact2Cell"
+    ];
+    const data = {};
+    fieldIds.forEach(id => {
+        const el = document.getElementById(id);
+        if(el) data[id] = el.value;
+    });
+    const json = JSON.stringify(data, null, 2);
+    document.getElementById("exportOutput").value = json;
+    if(navigator.clipboard){
+        navigator.clipboard.writeText(json).catch(()=>{});
+    }
+    document.getElementById("exportOutput").select();
+});
+</script>
+</body>
+</html>
